@@ -82,14 +82,122 @@ GH_APP_CONFIG_DIR=~/.config/gh-app/staging gh-app status
 
 The private key is referenced by path and is not copied.
 
+## Enable it globally
+
+Three separate pieces have to be in place. They are independent — each can be installed,
+verified and removed on its own, and doing only some of them is a valid choice.
+
+**1. Configuration.** Create `~/.config/gh-app/config.toml` as described above, then check
+that the Apps resolve:
+
+```bash
+gh-app status
+```
+
+It prints each App and the installations GitHub reports for it. If that fails, nothing
+below will work.
+
+**2. Git.** This is what makes `git clone`, `fetch` and `push` use App credentials:
+
+```bash
+gh-app git-install --global
+```
+
+It prints the resulting helper chain before writing it. Without `--global` the helper is
+installed for the current repository only, which is the safer default when trying it out.
+
+**3. `gh`.** This is a separate mechanism — `gh` keeps its own token store and never
+consults Git's credential helpers, so step 2 does not affect it. Add to `~/.zshrc`
+(or `~/.bashrc`, with `bash` in place of `zsh`):
+
+```bash
+command -v gh-app >/dev/null 2>&1 && eval "$(gh-app shell-init zsh)"
+```
+
+Open a new shell afterwards. Read the section below on what this changes before keeping it
+— for some commands it changes their meaning, not just the token behind them.
+
+### Verifying it took effect
+
+Identity depends on where you are, so check from two places:
+
+```bash
+cd <a repository an App reaches>
+git credential fill <<< $'protocol=https\nhost=github.com\n'   # username=x-access-token
+gh api rate_limit --jq .rate.limit                              # 15000
+
+cd /tmp
+gh api user --jq .login                                         # your own login
+gh api rate_limit --jq .rate.limit                              # 5000
+```
+
+Commits still show you as their author — that is expected and does not mean the setup
+failed. See *What the App identity does and does not change* below.
+
+### Removing it
+
+Each piece comes out independently:
+
+```bash
+git config --global --unset-all credential.https://github.com.helper   # step 2
+# delete the eval line from ~/.zshrc, then open a new shell            # step 3
+rm -rf ~/.config/gh-app                                                # step 1, config and cache
+```
+
+Removing the Git helper leaves the chain empty for `github.com`, so Git falls back to
+whatever your system configuration provides — on macOS that is usually `osxkeychain`. If
+you had `gh auth setup-git` before, run it again to restore that entry explicitly.
+
 ## Use with gh
+
+Try it in the current shell first:
 
 ```bash
 eval "$(gh-app shell-init zsh)" # use bash for bash
 gh repo view
 ```
 
-The shell function infers `origin` from the current Git repository. It delegates unchanged to personal `gh` credentials when no App matches, when repository context is unavailable, when `GH_APP_DISABLE=1`, or when `GH_TOKEN` is already set. For scripts:
+To keep it, add the same line to `~/.zshrc` (or `~/.bashrc`):
+
+```bash
+command -v gh-app >/dev/null 2>&1 && eval "$(gh-app shell-init zsh)"
+```
+
+The shell function infers `origin` from the current Git repository. It delegates unchanged to personal `gh` credentials when no App matches, when repository context is unavailable, when `GH_APP_DISABLE=1`, or when `GH_TOKEN` is already set.
+
+### What changes once the function is active
+
+Inside a repository an App reaches, `gh` runs as the App installation rather than as you.
+Everywhere else — outside a Git repository, in a repository no App reaches, or behind an
+SSH remote — nothing changes at all.
+
+That identity swap is not cosmetic. Measured against a live installation:
+
+| command | as you | as the App |
+|---|---|---|
+| `gh api rate_limit` | 5000/hour | 15000/hour |
+| `gh api user` | your login | **fails, HTTP 403** |
+| `gh repo list` | *your* repositories | **the installation's repositories** |
+| `gh repo view`, `pr list`, `issue list`, `release list`, `auth status` | unchanged | unchanged |
+
+Two of those deserve attention.
+
+`gh api user` fails because an installation token does not represent a user. Any command
+that resolves "the authenticated user" fails the same way. This is loud — you will see it.
+
+`gh repo list` is the quiet one. It succeeds and returns a plausible list, but the list is
+of repositories the *installation* can reach, not yours. Nothing signals the difference.
+If a command's meaning depends on who is asking, check which identity is in effect before
+trusting its output.
+
+Either escape hatch restores your own credentials for a single command:
+
+```bash
+GH_APP_DISABLE=1 gh repo list
+GH_TOKEN="$(gh auth token)" gh api user
+```
+
+For scripts:
 
 ```bash
 gh-app token --target OWNER/REPO
@@ -149,6 +257,47 @@ so the events endpoint can make it look as though nothing changed.
 
 Setting `user.email` to the bot address would make commits appear authored by the bot too,
 but that misattributes work you did to an automation account and is not recommended.
+
+### Which identity a given action uses
+
+Git and `gh` reach credentials by different routes, and only one of those routes is always
+active. Git consults the credential helper on every operation, wherever it runs. `gh` gets
+the App token from the shell function — so the question for any `gh` command is simply
+whether that function is defined in the shell running it.
+
+| action | credential route | identity |
+|---|---|---|
+| `git push`, `fetch`, `clone` | credential helper | the App |
+| `gh …` where the function is defined | function injects `GH_TOKEN` | the App |
+| `gh …` where it is not | `gh`'s own token store | you |
+| `GH_TOKEN=… gh …` | the token you supplied | whoever that token belongs to |
+
+Being non-interactive is not itself the deciding factor, though it is the most common
+reason: zsh reads `~/.zshrc` only for interactive shells, so `zsh -c` does not get the
+function while `zsh -i -c` does. A script that sources the rc file, or inherits an
+environment where the function is already defined, uses the App like any terminal would.
+
+The other case is a shell that started before the function was installed. A long-lived
+session, or a tool that snapshots your environment at launch and reuses it, keeps running
+with the definitions it captured — adding the line to `~/.zshrc` afterwards does nothing
+for it until it is restarted or the file is sourced again.
+
+So a pull request may show your account even though its branch was pushed by the App. That
+is not a broken setup: `git push` went through the helper, and that `gh` invocation did not
+go through the function.
+
+To confirm which is in effect, ask the shell rather than guessing:
+
+```bash
+type gh    # "a shell function" means the App path is available here
+```
+
+Scripts that want the App identity should not rely on the function being present. Pass the
+token explicitly:
+
+```bash
+GH_TOKEN="$(gh-app token --target OWNER/REPO)" gh pr create …
+```
 
 ## Other commands
 
