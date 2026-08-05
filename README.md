@@ -82,6 +82,72 @@ GH_APP_CONFIG_DIR=~/.config/gh-app/staging gh-app status
 
 The private key is referenced by path and is not copied.
 
+## Enable it globally
+
+Three separate pieces have to be in place. They are independent — each can be installed,
+verified and removed on its own, and doing only some of them is a valid choice.
+
+**1. Configuration.** Create `~/.config/gh-app/config.toml` as described above, then check
+that the Apps resolve:
+
+```bash
+gh-app status
+```
+
+It prints each App and the installations GitHub reports for it. If that fails, nothing
+below will work.
+
+**2. Git.** This is what makes `git clone`, `fetch` and `push` use App credentials:
+
+```bash
+gh-app git-install --global
+```
+
+It prints the resulting helper chain before writing it. Without `--global` the helper is
+installed for the current repository only, which is the safer default when trying it out.
+
+**3. `gh`.** This is a separate mechanism — `gh` keeps its own token store and never
+consults Git's credential helpers, so step 2 does not affect it. Add to `~/.zshrc`
+(or `~/.bashrc`, with `bash` in place of `zsh`):
+
+```bash
+command -v gh-app >/dev/null 2>&1 && eval "$(gh-app shell-init zsh)"
+```
+
+Open a new shell afterwards. Read the section below on what this changes before keeping it
+— for some commands it changes their meaning, not just the token behind them.
+
+### Verifying it took effect
+
+Identity depends on where you are, so check from two places:
+
+```bash
+cd <a repository an App reaches>
+git credential fill <<< $'protocol=https\nhost=github.com\n'   # username=x-access-token
+gh api rate_limit --jq .rate.limit                              # 15000
+
+cd /tmp
+gh api user --jq .login                                         # your own login
+gh api rate_limit --jq .rate.limit                              # 5000
+```
+
+Commits still show you as their author — that is expected and does not mean the setup
+failed. See *What the App identity does and does not change* below.
+
+### Removing it
+
+Each piece comes out independently:
+
+```bash
+git config --global --unset-all credential.https://github.com.helper   # step 2
+# delete the eval line from ~/.zshrc, then open a new shell            # step 3
+rm -rf ~/.config/gh-app                                                # step 1, config and cache
+```
+
+Removing the Git helper leaves the chain empty for `github.com`, so Git falls back to
+whatever your system configuration provides — on macOS that is usually `osxkeychain`. If
+you had `gh auth setup-git` before, run it again to restore that entry explicitly.
+
 ## Use with gh
 
 Try it in the current shell first:
