@@ -355,6 +355,44 @@ func TestCacheIsRepoKeyed(t *testing.T) {
 	}
 }
 
+func TestCacheRejectsRemovedAppAndKeepsConfiguredWarmHit(t *testing.T) {
+	d := isolatedConfig(t)
+	var requests int
+	s := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method == http.MethodGet {
+			installation(w, 22)
+			return
+		}
+		token(w, "app-b-token", time.Hour)
+	})
+	key := keyFile(t, d, "key.pem")
+	saveConfig(t, Config{Apps: []AppConfig{testApp(2, key, s.URL)}})
+	target := Target{"github.com", "acme", "repo"}
+	if err := cacheStore().Put(appcache.Entry{
+		Host: target.Host, Owner: target.Owner, Repo: target.Repo,
+		AppID: 1, InstallationID: 11, Token: "removed-app-token", ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := resolve(target)
+	if first.Outcome != OutcomeOK || first.AppID != 2 || first.Token != "app-b-token" {
+		t.Fatalf("removed App cache entry was served: %+v", first)
+	}
+	if requests != 2 {
+		t.Fatalf("probe-and-mint requests = %d, want 2", requests)
+	}
+
+	second := resolve(target)
+	if second.Outcome != OutcomeOK || second.AppID != 2 || second.Token != "app-b-token" {
+		t.Fatalf("configured App warm hit = %+v", second)
+	}
+	if requests != 2 {
+		t.Fatalf("warm hit made API requests: got %d total, want 2", requests)
+	}
+}
+
 func TestCacheRefreshAndCredentialInvalidation(t *testing.T) {
 	d := isolatedConfig(t)
 	var mints int
@@ -382,7 +420,7 @@ func TestCacheRefreshAndCredentialInvalidation(t *testing.T) {
 	if _, err := capture(t, func() error { return cmdCredential([]string{"erase"}) }); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cacheStore().Get(cacheTarget(target)); ok {
+	if _, ok := cacheStore().GetForApps(cacheTarget(target), []int64{1}); ok {
 		t.Fatal("credential erase did not invalidate rejected token")
 	}
 }
@@ -469,6 +507,106 @@ func TestSecurityContracts(t *testing.T) {
 		if _, err := makeJWT(AppConfig{AppID: 42, PrivateKey: path}); err != nil {
 			t.Fatal(err)
 		}
+	})
+
+	t.Run("private key permissions", func(t *testing.T) {
+		for _, mode := range []os.FileMode{0600, 0400} {
+			t.Run(fmt.Sprintf("accepts %04o", mode), func(t *testing.T) {
+				path := keyFile(t, t.TempDir(), "key.pem")
+				if err := os.Chmod(path, mode); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := makeJWT(AppConfig{AppID: 42, PrivateKey: path}); err != nil {
+					t.Fatalf("mode %04o rejected: %v", mode, err)
+				}
+			})
+		}
+
+		t.Run("rejects 0644 with remedy", func(t *testing.T) {
+			path := keyFile(t, t.TempDir(), "key.pem")
+			if err := os.Chmod(path, 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := makeJWT(AppConfig{AppID: 42, PrivateKey: path})
+			if err == nil {
+				t.Fatal("0644 private key was accepted")
+			}
+			message := err.Error()
+			for _, want := range []string{path, "0644", "group or other", "chmod 600"} {
+				if !strings.Contains(message, want) {
+					t.Fatalf("error %q does not contain %q", message, want)
+				}
+			}
+		})
+
+		t.Run("validates opened descriptor after path replacement", func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "key.pem")
+			if err := os.WriteFile(path, []byte("original"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, 0644); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+
+			replacement := filepath.Join(dir, "replacement.pem")
+			if err := os.WriteFile(replacement, []byte("replacement"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(replacement, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(replacement, path); err != nil {
+				t.Fatal(err)
+			}
+
+			err = validatePrivateKeyFile(f, path)
+			if err == nil || !strings.Contains(err.Error(), "0644") {
+				t.Fatalf("error = %v, want refusal mentioning 0644", err)
+			}
+		})
+
+		for _, tc := range []struct {
+			name    string
+			mode    os.FileMode
+			wantErr bool
+		}{
+			{name: "accepts symlink to 0600 target", mode: 0600},
+			{name: "rejects symlink to 0644 target", mode: 0644, wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				target := keyFile(t, dir, "target.pem")
+				if err := os.Chmod(target, tc.mode); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, "key.pem")
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+				_, err := makeJWT(AppConfig{AppID: 42, PrivateKey: path})
+				if tc.wantErr {
+					if err == nil || !strings.Contains(err.Error(), "0644") {
+						t.Fatalf("error = %v, want refusal mentioning 0644", err)
+					}
+				} else if err != nil {
+					t.Fatalf("symlink to 0600 target rejected: %v", err)
+				}
+			})
+		}
+
+		t.Run("rejects non-regular file", func(t *testing.T) {
+			path := t.TempDir()
+			_, err := makeJWT(AppConfig{AppID: 42, PrivateKey: path})
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "not a regular file") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	})
 
 	t.Run("API error status and message", func(t *testing.T) {

@@ -310,7 +310,7 @@ gh-app version  # print the version derived from the release tag
 
 ## Security
 
-- Protect the PEM file with OS file permissions, e.g. `chmod 600 private-key.pem`.
+- `gh-app` refuses to use a private key readable by group or other. Keys downloaded from GitHub may arrive group- or other-readable (commonly `0644`), so run `chmod 600 private-key.pem` before first use.
 - Each computer holding the private key can act as the GitHub App installation within its granted permissions.
 - Prefer a separate GitHub App or private key per trust boundary. GitHub App private keys can be revoked independently.
 - Configuration and cache files use mode `0600`; their directory uses `0700`.

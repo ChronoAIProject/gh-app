@@ -99,8 +99,9 @@ is the authority.
 
 Input: `(host, owner, repo?)`, or an explicit `GH_APP_TARGET` override.
 
-1. **Cache lookup** on key `(host, owner, repo)`. Hit with a token more than 5 minutes
-   from expiry → return it.
+1. **Cache lookup** on key `(host, owner, repo)`, qualified by the App IDs in the
+   currently loaded configuration. A row whose `app_id` is no longer configured is a
+   miss. Otherwise, a hit with a token more than 5 minutes from expiry → return it.
 2. **Candidate ordering**: Apps matching `host`; those listing `owner` in `owners` first,
    then the rest in config order.
 3. **Probe** each candidate with an App JWT: `GET /repos/{owner}/{repo}/installation`
@@ -453,3 +454,31 @@ than resolved by majority.
 is a contract limit, not a defect: the wrapper cannot observe `gh`'s HTTP status. Git gets
 invalidation through the credential helper's `erase`. A user hitting this runs
 `gh-app clear`. Documented in section 6 and in the README.
+
+---
+
+# 15. Credential identity and private-key permissions (2026-08-06)
+
+## 15.1 Cache entries must name a currently configured App
+
+Cache lookup is exposed as `GetForApps(target, configuredAppIDs)`, so an external caller
+cannot request an entry without stating the current App identities. An entry whose
+`app_id` is absent is a read-only miss; the normal probe-and-mint path replaces it through
+`Put`. Lookup does not delete or mutate rows and remains lock-free.
+
+Known limit: membership does not detect replacement of a private key under an unchanged
+`app_id`; this is a deliberate choice rather than an oversight. The token model suggests
+that rotation or revocation does not invalidate an already-issued installation token: the
+private key signs the App JWT used to request the token, while the issued token is an
+independent opaque bearer credential with its own expiry and is not subsequently verified
+against that key. This run did not verify a documented GitHub guarantee or confirm
+GitHub's server-side behavior on key revocation. For key rotation or suspected compromise,
+run `gh-app clear` and revoke the credential server-side on GitHub; no local cache
+mechanism can revoke a token an attacker already holds.
+
+## 15.2 Refuse exposed private keys at the signing boundary
+
+`makeJWT` opens the private-key path, stats that open descriptor, requires a regular file
+with no group or other permission bits, and reads from the same validated descriptor.
+Modes such as `0600` and `0400` are accepted; `0644` is refused with the actual mode and
+a `chmod 600` remedy. The tool never changes permissions on the user's key.

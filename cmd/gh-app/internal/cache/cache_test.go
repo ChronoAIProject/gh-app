@@ -26,7 +26,7 @@ func TestGetReadsWithoutWaitingForLock(t *testing.T) {
 	}
 	lock := holdLock(t, dir)
 	defer releaseLock(lock)
-	entry, ok := store.Get(Target{Host: "GITHUB.COM", Owner: "Acme", Repo: "repo.git"})
+	entry, ok := store.GetForApps(Target{Host: "GITHUB.COM", Owner: "Acme", Repo: "repo.git"}, []int64{1})
 	if !ok || entry.Token != "token-repo" {
 		t.Fatalf("entry = %+v, found = %v", entry, ok)
 	}
@@ -40,7 +40,7 @@ func TestPutNormalizesEntryForGet(t *testing.T) {
 	if err := store.Put(entry); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := store.Get(Target{Host: "github.com", Owner: "acme", Repo: "repo"})
+	got, ok := store.GetForApps(Target{Host: "github.com", Owner: "acme", Repo: "repo"}, []int64{1})
 	if !ok || got.Host != "github.com" || got.Owner != "acme" || got.Repo != "repo" {
 		t.Fatalf("entry = %+v, found = %v", got, ok)
 	}
@@ -53,8 +53,22 @@ func TestGetRefreshMargin(t *testing.T) {
 	if err := store.Put(entry); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.Get(Target{Host: entry.Host, Owner: entry.Owner, Repo: entry.Repo}); ok {
+	if _, ok := store.GetForApps(Target{Host: entry.Host, Owner: entry.Owner, Repo: entry.Repo}, []int64{1}); ok {
 		t.Fatal("entry inside five-minute refresh margin was returned")
+	}
+}
+
+func TestGetForAppsRequiresEntryAppMembership(t *testing.T) {
+	store := New(t.TempDir())
+	if err := store.Put(testEntry("repo")); err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Host: "github.com", Owner: "acme", Repo: "repo"}
+	if _, ok := store.GetForApps(target, []int64{2}); ok {
+		t.Fatal("entry for an unconfigured App was returned")
+	}
+	if entry, ok := store.GetForApps(target, []int64{2, 1}); !ok || entry.Token != "token-repo" {
+		t.Fatalf("configured App entry = %+v, found = %v", entry, ok)
 	}
 }
 
@@ -70,10 +84,10 @@ func TestInvalidatePreservesOtherEntriesAndIsIdempotent(t *testing.T) {
 	if err := store.Invalidate(remove); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.Get(remove); ok {
+	if _, ok := store.GetForApps(remove, []int64{1}); ok {
 		t.Fatal("invalidated entry remains")
 	}
-	if entry, ok := store.Get(Target{Host: "github.com", Owner: "acme", Repo: "keep"}); !ok || entry.Token != "token-keep" {
+	if entry, ok := store.GetForApps(Target{Host: "github.com", Owner: "acme", Repo: "keep"}, []int64{1}); !ok || entry.Token != "token-keep" {
 		t.Fatalf("unrelated entry = %+v, found = %v", entry, ok)
 	}
 	if err := store.Invalidate(Target{Host: "github.com", Owner: "acme", Repo: "keep"}); err != nil {
@@ -237,7 +251,7 @@ func TestConcurrentInsertionNeverResurrectsDeletion(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, ok := store.Get(Target{Host: "github.com", Owner: "acme", Repo: rejected}); ok {
+		if _, ok := store.GetForApps(Target{Host: "github.com", Owner: "acme", Repo: rejected}, []int64{1}); ok {
 			t.Fatalf("round %d: concurrent insertion resurrected rejected token", i)
 		}
 	}
