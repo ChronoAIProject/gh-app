@@ -126,6 +126,30 @@ git push
 
 The helper generates or refreshes a GitHub App installation token when Git asks for credentials.
 
+### What the App identity does and does not change
+
+Three identities are involved in a push, and the App credential governs only one of them.
+
+| | Where it comes from | Affected by gh-app |
+|---|---|---|
+| Commit **author** | your local `git config user.name` / `user.email` | no |
+| Commit **committer** | the same, or `GitHub` when a merge is made on the web | no |
+| **Pusher** | the credential the helper supplies | **yes** |
+
+Author and committer are recorded inside the commit object when it is created. Changing
+which credential pushes it later cannot rewrite them, so commits keep showing you as their
+author on GitHub. That is the intended result: the App governs *who may write to the
+repository*, not *who wrote the code*.
+
+The pusher is what changes. After `git-install`, GitHub records pushes to App-covered
+repositories as the App's bot account, which is what appears in branch protection rules,
+audit logs, and repository activity. Note that bot pushes are not reported through the
+public events API — `gh api repos/OWNER/REPO/activity` shows them, `.../events` does not,
+so the events endpoint can make it look as though nothing changed.
+
+Setting `user.email` to the bot address would make commits appear authored by the bot too,
+but that misattributes work you did to an automation account and is not recommended.
+
 ## Other commands
 
 ```bash
