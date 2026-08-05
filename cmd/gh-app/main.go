@@ -245,6 +245,22 @@ func resolve(target Target) Result {
 	return Result{Outcome: OutcomeNoMatch, Err: fmt.Errorf("no configured App established access to %s", formatTarget(target))}
 }
 
+// personalFallbackHelper returns the git credential helper that serves the
+// user's own credentials, or "" when gh is not installed.
+//
+// git-install resets the inherited helper chain so gh-app is consulted before
+// the unconditional system helper. That reset also removes gh's own entry, and
+// without restoring it a repository no App reaches would be left with no
+// credential source at all — which contradicts this tool's stated contract of
+// App-first with a personal-credential backstop.
+func personalFallbackHelper() string {
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return ""
+	}
+	return "!" + path + " auth git-credential"
+}
+
 func candidates(cfg Config, target Target) (preferred, remaining []AppConfig) {
 	for _, app := range cfg.Apps {
 		if !strings.EqualFold(app.Host, target.Host) {
@@ -498,20 +514,36 @@ func cmdGitInstall(args []string) error {
 		ordered = append(ordered, host)
 	}
 	sort.Strings(ordered)
+	self := `!"` + exe + `" credential`
+	fallback := personalFallbackHelper()
 	if *global {
 		for _, host := range ordered {
-			fmt.Printf("Resulting credential helper chain for https://%s:\n  helper =\n  helper = %s\n", host, `!"`+exe+`" credential`)
+			fmt.Printf("Resulting credential helper chain for https://%s:\n  helper =\n  helper = %s\n", host, self)
+			if fallback != "" {
+				fmt.Printf("  helper = %s\n", fallback)
+			}
 		}
 	}
 	for _, host := range ordered {
 		key := "credential.https://" + host + ".helper"
-		for _, cmd := range [][]string{{"config", scope, "--replace-all", key, ""}, {"config", scope, "--add", key, `!"` + exe + `" credential`}, {"config", scope, "credential.https://" + host + ".useHttpPath", "true"}} {
+		cmds := [][]string{
+			{"config", scope, "--replace-all", key, ""},
+			{"config", scope, "--add", key, self},
+		}
+		if fallback != "" {
+			cmds = append(cmds, []string{"config", scope, "--add", key, fallback})
+		}
+		cmds = append(cmds, []string{"config", scope, "credential.https://" + host + ".useHttpPath", "true"})
+		for _, cmd := range cmds {
 			c := exec.Command("git", cmd...)
 			c.Stdout, c.Stderr = os.Stdout, os.Stderr
 			if err := c.Run(); err != nil {
 				return err
 			}
 		}
+	}
+	if fallback == "" {
+		fmt.Fprintln(os.Stderr, "warning: gh not found on PATH; repositories no App reaches will have no credential helper")
 	}
 	fmt.Println("Installed Git credential helper for", strings.Join(ordered, ", "))
 	return nil
