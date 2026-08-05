@@ -1,0 +1,25 @@
+# Build output
+# Leading slash keeps the cmd/gh-app/ source directory tracked
+/gh-app
+/gh-app.exe
+dist/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Credentials — never commit GitHub App private keys
+*.pem
+*.key
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
