@@ -258,6 +258,40 @@ so the events endpoint can make it look as though nothing changed.
 Setting `user.email` to the bot address would make commits appear authored by the bot too,
 but that misattributes work you did to an automation account and is not recommended.
 
+### Which identity a given action uses
+
+Git and `gh` reach credentials by different routes, and only one of those routes is always
+active. Git consults the credential helper on every operation, wherever it runs. `gh` gets
+the App token from the shell function, which exists only in shells that sourced it — so a
+non-interactive shell, a script with `#!/bin/sh`, a cron job, a CI runner, or a tool that
+spawns `sh -c` all bypass it and fall back to whatever `gh auth` holds.
+
+| action | credential route | identity |
+|---|---|---|
+| `git push`, `fetch`, `clone` | credential helper | the App |
+| `gh …` in a shell that sourced the function | function injects `GH_TOKEN` | the App |
+| `gh …` in a non-interactive shell or script | `gh`'s own token store | you |
+| `GH_TOKEN=… gh …` | the token you supplied | whoever that token belongs to |
+
+The practical consequence is that a pull request opened from an interactive terminal is
+authored by the App, while the same command run from a script is authored by you — and
+both branches were pushed by the App either way. Seeing your own account on a pull request
+does not mean the setup failed; it means that particular command did not go through the
+function.
+
+To confirm which is in effect, ask the shell rather than guessing:
+
+```bash
+type gh    # "a shell function" means the App path is available here
+```
+
+Scripts that want the App identity should not rely on the function being present. Pass the
+token explicitly:
+
+```bash
+GH_TOKEN="$(gh-app token --target OWNER/REPO)" gh pr create …
+```
+
 ## Other commands
 
 ```bash
