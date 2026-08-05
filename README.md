@@ -39,21 +39,6 @@ make test-e2e
 
 The live tests skip when the variables are absent and fail loudly when only some are set. Each run mints a real installation token, which is read-only and expires after about an hour. `make test` clears these variables, so it stays offline regardless of `.env`.
 
-## Install with Homebrew
-
-`packaging/gh-app.rb` is a formula template: `url` and `sha256` carry placeholders that release preparation fills in. Homebrew installs formulae only from a tap and this repository is not one, so the completed formula goes into a local tap:
-
-```bash
-VERSION=0.2.0
-SHA="$(curl -sL "https://github.com/ChronoAIProject/gh-app/archive/refs/tags/v$VERSION.tar.gz" | shasum -a 256 | cut -d' ' -f1)"
-brew tap-new local/gh-app --no-git
-sed -e "s/VERSION_PLACEHOLDER/$VERSION/" -e "s/SHA256_PLACEHOLDER/$SHA/" packaging/gh-app.rb \
-  > "$(brew --repository)/Library/Taps/local/homebrew-gh-app/Formula/gh-app.rb"
-brew install local/gh-app/gh-app
-```
-
-The tap name is arbitrary and local to your machine. The formula builds from source, so Go is a build dependency, and its test block asserts that the installed binary reports the tagged version. Remove it with `brew uninstall gh-app && brew untap local/gh-app`.
-
 ## Install as a gh extension
 
 From GitHub, once a release is published:
@@ -69,6 +54,16 @@ gh extension install .
 ```
 
 The repository directory must be named `gh-app`, and the root must contain the `gh-app` executable. Alternatively place the binary on `PATH` and use `gh-app` directly.
+
+## Install with Homebrew
+
+Install from the project tap:
+
+```bash
+brew install ChronoAIProject/tap/gh-app
+```
+
+The formula builds from source, so Go is a build dependency, and its test block asserts that the installed binary reports the tagged version. Remove it with `brew uninstall gh-app && brew untap ChronoAIProject/tap`.
 
 ## Configure
 
