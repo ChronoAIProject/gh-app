@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.23.2
+      - name: Install required shells
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes zsh
+          command -v bash
+          command -v zsh
+      - name: Run acceptance gate
+        run: make verify
+      - name: Exercise release cross-builds
+        run: make dist

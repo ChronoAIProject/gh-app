@@ -1,24 +1,51 @@
 # gh-app
 
-Use a GitHub App installation transparently with both GitHub CLI (`gh`) and HTTPS Git.
+Resolve repository-scoped GitHub App installations for GitHub CLI (`gh`) and HTTPS Git, with personal credentials as the fallback when no App matches.
 
 ## Features
 
-- `gh app ...` extension command or standalone `gh-app`
+- multiple GitHub Apps and installations selected by repository
 - RS256 GitHub App JWT generation
-- installation-token caching and automatic refresh 5 minutes before expiry
-- transparent `GH_TOKEN` injection for arbitrary `gh` commands
+- repo-keyed installation-token caching and refresh 5 minutes before expiry
+- opt-in shell integration that leaves existing `GH_TOKEN` values untouched
 - Git credential-helper integration for clone/fetch/pull/push
 - GitHub.com and GitHub Enterprise API/host configuration
-- no runtime dependencies; one Go binary
+- one Go binary with a strict TOML configuration
 
 ## Build
 
 ```bash
-go build -o gh-app ./cmd/gh-app
+make build
 ```
 
+The supported release platforms are macOS on arm64 and amd64, and Linux on arm64 and amd64. Windows is excluded because the cache's advisory file locking uses Unix `flock` semantics and the program does not compile for Windows. `make dist` compiles all four advertised targets into `dist/`, named for the `gh` extension convention (`gh-app-<os>-<arch>`). Both `make build` and `make dist` stamp `gh-app version` from the current Git tag, falling back to `dev` when no tag describes the checkout.
+
+## Tests
+
+```bash
+make test
+```
+
+The suite runs offline and needs no credentials: it generates its own RSA keys and serves GitHub responses through hermetic `httptest` request/response fixtures.
+
+One thing it cannot cover is whether GitHub accepts the JWT the binary mints — a local test server replies to whatever it is sent. To check that against the real API, copy the template and fill in an installation:
+
+```bash
+cp .env.example .env
+make test-e2e
+```
+
+`.env` is git-ignored and references the App ID, target owner/repository, and private-key path. `.env.example` documents each value and covers GitHub Enterprise Server.
+
+The live tests skip when the variables are absent and fail loudly when only some are set. Each run mints a real installation token, which is read-only and expires after about an hour. `make test` clears these variables, so it stays offline regardless of `.env`.
+
 ## Install as a gh extension
+
+From GitHub, once a release is published:
+
+```bash
+gh extension install ChronoAIProject/gh-app
+```
 
 From a local clone:
 
@@ -30,48 +57,54 @@ The repository directory must be named `gh-app`, and the root must contain the `
 
 ## Configure
 
-```bash
-gh app init \
-  --app-id 123456 \
-  --installation-id 78901234 \
-  --key ~/.config/github-app/private-key.pem
+Create `~/.config/gh-app/config.toml`:
+
+```toml
+[[apps]]
+app_id = 123456
+private_key = "~/.config/github-app/work.pem"
+owners = ["MyOrganization"]
+
+[[apps]]
+app_id = 789012
+private_key = "~/.config/github-app/enterprise.pem"
+host = "github.example.com"
+api_url = "https://github.example.com/api/v3"
 ```
 
-For GitHub Enterprise Server:
+Unknown keys are rejected. Installation IDs are discovered from GitHub at resolution time. The unified cache is `~/.config/gh-app/cache.json`. `GH_APP_CONFIG_DIR` relocates both files; otherwise `$XDG_CONFIG_HOME/gh-app` is used when set, followed by `~/.config/gh-app`. Migrate an old singleton JSON configuration explicitly with `gh-app migrate`.
 
 ```bash
-gh app init \
-  --app-id 123456 \
-  --installation-id 78901234 \
-  --key ~/.config/github-app/private-key.pem \
-  --host github.example.com \
-  --api-url https://github.example.com/api/v3
+GH_APP_CONFIG_DIR=~/.config/gh-app/staging gh-app status
 ```
 
-The configuration is stored under the operating system user config directory. The private key is referenced by path and is not copied.
+The private key is referenced by path and is not copied.
 
 ## Use with gh
 
 ```bash
-gh app exec -- gh repo view OWNER/REPO
-gh app exec -- gh pr list --repo OWNER/REPO
-gh app exec -- gh api repos/OWNER/REPO
+eval "$(gh-app shell-init zsh)" # use bash for bash
+gh repo view
 ```
 
-Print a token for shell integration:
+The shell function infers `origin` from the current Git repository. It delegates unchanged to personal `gh` credentials when no App matches, when repository context is unavailable, when `GH_APP_DISABLE=1`, or when `GH_TOKEN` is already set. For scripts:
 
 ```bash
-export GH_TOKEN="$(gh app token)"
-gh pr list --repo OWNER/REPO
+gh-app token --target OWNER/REPO
+GH_APP_TARGET=OWNER/REPO gh-app token --auto
 ```
+
+Git reports rejected credentials back through the helper and invalidates that repository's cached token. The shell-wrapped `gh` process does not expose GitHub HTTP status to the wrapper; after access is revoked, run `gh-app clear` to force revalidation before the normal five-minute refresh margin.
 
 ## Use with Git
 
-Install the helper globally once:
+Install the helper in the current repository (the default):
 
 ```bash
-gh app git-install
+gh-app git-install
 ```
+
+Use `gh-app git-install --global` only when global interception is intended; it previews the resulting helper chain first. Both modes reset inherited helpers for configured hosts before adding `gh-app`.
 
 Then use HTTPS remotes normally:
 
@@ -86,8 +119,10 @@ The helper generates or refreshes a GitHub App installation token when Git asks 
 ## Other commands
 
 ```bash
-gh app status   # validate configuration and show token expiry
-gh app clear    # clear cached installation token
+gh-app status   # list each App and its reachable installations
+gh-app clear    # clear the unified cache
+gh-app migrate  # explicitly convert legacy config.json
+gh-app version  # print the version derived from the release tag
 ```
 
 ## Security
@@ -95,4 +130,5 @@ gh app clear    # clear cached installation token
 - Protect the PEM file with OS file permissions, e.g. `chmod 600 private-key.pem`.
 - Each computer holding the private key can act as the GitHub App installation within its granted permissions.
 - Prefer a separate GitHub App or private key per trust boundary. GitHub App private keys can be revoked independently.
-- The cached installation token is written with user-only permissions and expires after approximately one hour.
+- Configuration and cache files use mode `0600`; their directory uses `0700`.
+- Cached installation tokens are keyed by host, owner, and repository and expire after approximately one hour.
