@@ -39,6 +39,21 @@ make test-e2e
 
 The live tests skip when the variables are absent and fail loudly when only some are set. Each run mints a real installation token, which is read-only and expires after about an hour. `make test` clears these variables, so it stays offline regardless of `.env`.
 
+## Install with Homebrew
+
+`packaging/gh-app.rb` is a formula template: `url` and `sha256` carry placeholders that release preparation fills in. Homebrew installs formulae only from a tap and this repository is not one, so the completed formula goes into a local tap:
+
+```bash
+VERSION=0.2.0
+SHA="$(curl -sL "https://github.com/ChronoAIProject/gh-app/archive/refs/tags/v$VERSION.tar.gz" | shasum -a 256 | cut -d' ' -f1)"
+brew tap-new local/gh-app --no-git
+sed -e "s/VERSION_PLACEHOLDER/$VERSION/" -e "s/SHA256_PLACEHOLDER/$SHA/" packaging/gh-app.rb \
+  > "$(brew --repository)/Library/Taps/local/homebrew-gh-app/Formula/gh-app.rb"
+brew install local/gh-app/gh-app
+```
+
+The tap name is arbitrary and local to your machine. The formula builds from source, so Go is a build dependency, and its test block asserts that the installed binary reports the tagged version. Remove it with `brew uninstall gh-app && brew untap local/gh-app`.
+
 ## Install as a gh extension
 
 From GitHub, once a release is published:
@@ -123,13 +138,18 @@ Identity depends on where you are, so check from two places:
 
 ```bash
 cd <a repository an App reaches>
-git credential fill <<< $'protocol=https\nhost=github.com\n'   # username=x-access-token
-gh api rate_limit --jq .rate.limit                              # 15000
+git credential fill <<< $'protocol=https\nhost=github.com\npath=OWNER/REPO.git\n'  # username=x-access-token
+gh api rate_limit --jq .rate.limit                                                # 15000
 
 cd /tmp
-gh api user --jq .login                                         # your own login
-gh api rate_limit --jq .rate.limit                              # 5000
+gh api user --jq .login                                                           # your own login
+gh api rate_limit --jq .rate.limit                                                # 5000
 ```
+
+The `path` line is required. The helper takes the repository from the credential request itself,
+not from the working directory, so a request without one matches nothing and Git falls through to
+your personal credentials — which is indistinguishable from a setup that did not work. Real Git
+operations supply the path because `git-install` sets `useHttpPath`.
 
 Commits still show you as their author — that is expected and does not mean the setup
 failed. See *What the App identity does and does not change* below.
@@ -140,6 +160,7 @@ Each piece comes out independently:
 
 ```bash
 git config --global --unset-all credential.https://github.com.helper   # step 2
+git config --global --unset credential.https://github.com.useHttpPath  # step 2
 # delete the eval line from ~/.zshrc, then open a new shell            # step 3
 rm -rf ~/.config/gh-app                                                # step 1, config and cache
 ```
@@ -221,6 +242,8 @@ helper =                              # reset
 helper = !"…/gh-app" credential       # repositories an App reaches
 helper = !…/gh auth git-credential    # everything else, as your own account
 ```
+
+Both modes also set `credential.https://<host>.useHttpPath` to `true`. Git omits the repository path from credential requests by default, and the helper resolves the App from that path, so without this setting nothing would ever match.
 
 `gh-app` returns nothing for a repository no App reaches, so git falls through to `gh` and those repositories keep working exactly as before. If `gh` is not on `PATH` the fallback is omitted and a warning says so.
 
