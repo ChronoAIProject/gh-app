@@ -84,12 +84,54 @@ The private key is referenced by path and is not copied.
 
 ## Use with gh
 
+Try it in the current shell first:
+
 ```bash
 eval "$(gh-app shell-init zsh)" # use bash for bash
 gh repo view
 ```
 
-The shell function infers `origin` from the current Git repository. It delegates unchanged to personal `gh` credentials when no App matches, when repository context is unavailable, when `GH_APP_DISABLE=1`, or when `GH_TOKEN` is already set. For scripts:
+To keep it, add the same line to `~/.zshrc` (or `~/.bashrc`):
+
+```bash
+command -v gh-app >/dev/null 2>&1 && eval "$(gh-app shell-init zsh)"
+```
+
+The shell function infers `origin` from the current Git repository. It delegates unchanged to personal `gh` credentials when no App matches, when repository context is unavailable, when `GH_APP_DISABLE=1`, or when `GH_TOKEN` is already set.
+
+### What changes once the function is active
+
+Inside a repository an App reaches, `gh` runs as the App installation rather than as you.
+Everywhere else — outside a Git repository, in a repository no App reaches, or behind an
+SSH remote — nothing changes at all.
+
+That identity swap is not cosmetic. Measured against a live installation:
+
+| command | as you | as the App |
+|---|---|---|
+| `gh api rate_limit` | 5000/hour | 15000/hour |
+| `gh api user` | your login | **fails, HTTP 403** |
+| `gh repo list` | *your* repositories | **the installation's repositories** |
+| `gh repo view`, `pr list`, `issue list`, `release list`, `auth status` | unchanged | unchanged |
+
+Two of those deserve attention.
+
+`gh api user` fails because an installation token does not represent a user. Any command
+that resolves "the authenticated user" fails the same way. This is loud — you will see it.
+
+`gh repo list` is the quiet one. It succeeds and returns a plausible list, but the list is
+of repositories the *installation* can reach, not yours. Nothing signals the difference.
+If a command's meaning depends on who is asking, check which identity is in effect before
+trusting its output.
+
+Either escape hatch restores your own credentials for a single command:
+
+```bash
+GH_APP_DISABLE=1 gh repo list
+GH_TOKEN="$(gh auth token)" gh api user
+```
+
+For scripts:
 
 ```bash
 gh-app token --target OWNER/REPO
