@@ -51,6 +51,9 @@ const (
 	OutcomeConfigError      Outcome = "config-error"
 	OutcomeOperationalError Outcome = "operational-error"
 	cacheFallbackExitCode           = 75
+	// GitHub rejects App JWTs expiring over 10 minutes ahead; backdating iat absorbs clock skew.
+	jwtIssuedAtSkewSeconds = 60
+	jwtExpiresAfterSeconds = 9 * 60
 )
 
 type Target struct{ Host, Owner, Repo string }
@@ -199,7 +202,7 @@ func resolve(target Target) Result {
 	if err != nil {
 		return Result{Outcome: OutcomeConfigError, Err: err}
 	}
-	entry, ok := cacheStore().Get(cacheTarget(target))
+	entry, ok := cacheStore().GetForApps(cacheTarget(target), configuredAppIDs(cfg))
 	if ok {
 		return Result{Outcome: OutcomeOK, Token: entry.Token, ExpiresAt: entry.ExpiresAt, AppID: entry.AppID, InstallationID: entry.InstallationID}
 	}
@@ -368,6 +371,14 @@ func cacheStore() *appcache.Store { return appcache.New(configDir()) }
 
 func cacheTarget(target Target) appcache.Target {
 	return appcache.Target{Host: target.Host, Owner: target.Owner, Repo: target.Repo}
+}
+
+func configuredAppIDs(cfg Config) []int64 {
+	ids := make([]int64, len(cfg.Apps))
+	for i, app := range cfg.Apps {
+		ids[i] = app.AppID
+	}
+	return ids
 }
 
 func cacheMintedEntry(entry appcache.Entry) error {
@@ -736,10 +747,33 @@ func formatTarget(t Target) string {
 	return t.Host + "/" + t.Owner + "/" + t.Repo
 }
 
-func makeJWT(app AppConfig) (string, error) {
-	b, err := os.ReadFile(expandHome(app.PrivateKey))
+func validatePrivateKeyFile(f *os.File, path string) error {
+	info, err := f.Stat()
 	if err != nil {
+		return fmt.Errorf("stat private key %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("private key %s is not a regular file (mode %s)", path, info.Mode())
+	}
+	if info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("private key %s has mode %04o; permissions must not allow group or other access (0600 or stricter); run chmod 600 %s", path, info.Mode().Perm(), path)
+	}
+	return nil
+}
+
+func makeJWT(app AppConfig) (string, error) {
+	path := expandHome(app.PrivateKey)
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open private key %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := validatePrivateKeyFile(f, path); err != nil {
 		return "", err
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return "", fmt.Errorf("read private key %s: %w", path, err)
 	}
 	block, _ := pem.Decode(b)
 	if block == nil {
@@ -761,7 +795,7 @@ func makeJWT(app AppConfig) (string, error) {
 	}
 	now := time.Now().Unix()
 	header := b64([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload := b64([]byte(`{"iat":` + strconv.FormatInt(now-60, 10) + `,"exp":` + strconv.FormatInt(now+540, 10) + `,"iss":"` + strconv.FormatInt(app.AppID, 10) + `"}`))
+	payload := b64([]byte(`{"iat":` + strconv.FormatInt(now-jwtIssuedAtSkewSeconds, 10) + `,"exp":` + strconv.FormatInt(now+jwtExpiresAfterSeconds, 10) + `,"iss":"` + strconv.FormatInt(app.AppID, 10) + `"}`))
 	input := header + "." + payload
 	h := sha256.Sum256([]byte(input))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, h[:])

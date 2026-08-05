@@ -37,14 +37,23 @@ func New(configDir string) *Store {
 	return &Store{dir: configDir}
 }
 
-func (s *Store) Get(target Target) (Entry, bool) {
+func (s *Store) GetForApps(target Target, configuredAppIDs []int64) (Entry, bool) {
 	target = normalizeTarget(target)
 	for _, entry := range s.read().Entries {
-		if sameTarget(entry, target) && entry.Token != "" && time.Until(entry.ExpiresAt) > 5*time.Minute {
+		if sameTarget(entry, target) && containsAppID(configuredAppIDs, entry.AppID) && entry.Token != "" && time.Until(entry.ExpiresAt) > 5*time.Minute {
 			return entry, true
 		}
 	}
 	return Entry{}, false
+}
+
+func containsAppID(appIDs []int64, appID int64) bool {
+	for _, configured := range appIDs {
+		if configured == appID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) Put(entry Entry) error {
