@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4 # v4
+        with:
+          go-version: 1.23.2
+      - name: Install required shells
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes zsh
+          command -v bash
+          command -v zsh
+      - name: Assert exact release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+      - name: Run acceptance gate
+        run: make verify
+      - name: Build release artifacts from tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: make VERSION="$RELEASE_TAG" dist
+      - name: Assert stamped version and create checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$(dist/gh-app-linux-amd64 version)" = "$RELEASE_TAG"
+          cd dist
+          sha256sum gh-app-* > SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null; then
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/gh-app-* dist/SHA256SUMS --clobber

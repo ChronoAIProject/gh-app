@@ -191,6 +191,23 @@ func TestPutEnforcesDirectoryAndLockModes(t *testing.T) {
 	})
 }
 
+func TestLockRejectsSymlinkWithoutChangingTargetMode(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "unrelated")
+	if err := os.WriteFile(target, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, ".cache.flock")); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(dir).Put(testEntry("repo")); err == nil {
+		t.Fatal("Put succeeded with a symlink lock path")
+	}
+	if got := fileMode(t, target); got != 0644 {
+		t.Fatalf("symlink target mode = %o, want 0644", got)
+	}
+}
+
 func TestConcurrentInsertionNeverResurrectsDeletion(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "config")
 	store := New(dir)
@@ -289,6 +306,12 @@ func TestHeldLockBoundsWrites(t *testing.T) {
 				t.Fatalf("elapsed = %s", elapsed)
 			}
 		})
+	}
+}
+
+func TestLockTimeoutContract(t *testing.T) {
+	if lockTimeout != time.Second {
+		t.Fatalf("lockTimeout = %s, want 1s", lockTimeout)
 	}
 }
 

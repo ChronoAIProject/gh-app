@@ -224,6 +224,19 @@ func capture(t *testing.T, fn func() error) (string, error) {
 	return out, err
 }
 
+func TestVersionPrintsStampedValue(t *testing.T) {
+	old := version
+	version = "v1.2.3-test"
+	t.Cleanup(func() { version = old })
+	out, err := capture(t, func() error { return dispatch([]string{"version"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "v1.2.3-test\n" {
+		t.Fatalf("version output = %q", out)
+	}
+}
+
 func stdin(t *testing.T, s string) {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "stdin")

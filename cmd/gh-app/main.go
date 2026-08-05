@@ -69,33 +69,14 @@ func (e cacheFallbackError) Error() string { return e.err.Error() }
 func (e cacheFallbackError) Unwrap() error { return e.err }
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
 	}
-	var err error
-	switch os.Args[1] {
-	case "token":
-		err = cmdToken(os.Args[2:])
-	case "credential":
-		err = cmdCredential(os.Args[2:])
-	case "git-install":
-		err = cmdGitInstall(os.Args[2:])
-	case "shell-init":
-		err = cmdShellInit(os.Args[2:])
-	case "status":
-		err = cmdStatus()
-	case "clear":
-		err = clearCache()
-	case "migrate":
-		err = cmdMigrate()
-	case "help", "--help", "-h":
-		usage()
-	default:
-		err = fmt.Errorf("unknown command %q", os.Args[1])
-	}
+	err := dispatch(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gh-app:", err)
 		var fallback cacheFallbackError
@@ -103,6 +84,32 @@ func main() {
 			os.Exit(cacheFallbackExitCode)
 		}
 		os.Exit(1)
+	}
+}
+
+func dispatch(args []string) error {
+	switch args[0] {
+	case "token":
+		return cmdToken(args[1:])
+	case "credential":
+		return cmdCredential(args[1:])
+	case "git-install":
+		return cmdGitInstall(args[1:])
+	case "shell-init":
+		return cmdShellInit(args[1:])
+	case "status":
+		return cmdStatus()
+	case "clear":
+		return clearCache()
+	case "migrate":
+		return cmdMigrate()
+	case "version":
+		return cmdVersion()
+	case "help", "--help", "-h":
+		usage()
+		return nil
+	default:
+		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
 
@@ -117,7 +124,13 @@ Usage:
   gh-app status
   gh-app clear
   gh-app migrate
+  gh-app version
 `)
+}
+
+func cmdVersion() error {
+	fmt.Println(version)
+	return nil
 }
 
 func configDir() string {

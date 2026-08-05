@@ -137,11 +137,18 @@ func (s *Store) lock() (*os.File, error) {
 		return nil, err
 	}
 	lockPath := filepath.Join(s.dir, ".cache.flock")
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if errors.Is(err, os.ErrExist) {
-		lock, err = os.OpenFile(lockPath, os.O_RDWR, 0)
+		lock, err = os.OpenFile(lockPath, os.O_RDWR|syscall.O_NOFOLLOW, 0)
 		if err == nil {
-			err = lock.Chmod(0600)
+			var info os.FileInfo
+			info, err = lock.Stat()
+			if err == nil && !info.Mode().IsRegular() {
+				err = fmt.Errorf("cache lock is not a regular file: %s", lockPath)
+			}
+			if err == nil {
+				err = lock.Chmod(0600)
+			}
 		}
 	}
 	if err != nil {

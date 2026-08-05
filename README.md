@@ -18,7 +18,7 @@ Resolve repository-scoped GitHub App installations for GitHub CLI (`gh`) and HTT
 make build
 ```
 
-Equivalent to `go build -trimpath -ldflags="-s -w" -o gh-app ./cmd/gh-app`. Use `make dist` to cross-compile release binaries into `dist/`, named for the `gh` extension convention (`gh-app-<os>-<arch>`).
+The supported release platforms are macOS on arm64 and amd64, and Linux on arm64 and amd64. Windows is excluded because the cache's advisory file locking uses Unix `flock` semantics and the program does not compile for Windows. `make dist` compiles all four advertised targets into `dist/`, named for the `gh` extension convention (`gh-app-<os>-<arch>`). Both `make build` and `make dist` stamp `gh-app version` from the current Git tag, falling back to `dev` when no tag describes the checkout.
 
 ## Tests
 
@@ -72,10 +72,10 @@ host = "github.example.com"
 api_url = "https://github.example.com/api/v3"
 ```
 
-Unknown keys are rejected. Installation IDs are discovered from GitHub at resolution time. The unified cache is `~/.config/gh-app/cache.json`. `GH_APP_CONFIG_DIR` relocates both files; otherwise `$XDG_CONFIG_HOME/gh-app` is used when set, followed by `~/.config/gh-app` on Unix-like systems or the platform config directory on Windows. Migrate an old singleton JSON configuration explicitly with `gh-app migrate`.
+Unknown keys are rejected. Installation IDs are discovered from GitHub at resolution time. The unified cache is `~/.config/gh-app/cache.json`. `GH_APP_CONFIG_DIR` relocates both files; otherwise `$XDG_CONFIG_HOME/gh-app` is used when set, followed by `~/.config/gh-app`. Migrate an old singleton JSON configuration explicitly with `gh-app migrate`.
 
 ```bash
-GH_APP_CONFIG_DIR=~/.config/gh-app/staging gh app status
+GH_APP_CONFIG_DIR=~/.config/gh-app/staging gh-app status
 ```
 
 The private key is referenced by path and is not copied.
@@ -122,6 +122,7 @@ The helper generates or refreshes a GitHub App installation token when Git asks 
 gh-app status   # list each App and its reachable installations
 gh-app clear    # clear the unified cache
 gh-app migrate  # explicitly convert legacy config.json
+gh-app version  # print the version derived from the release tag
 ```
 
 ## Security
