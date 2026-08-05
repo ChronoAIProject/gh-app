@@ -262,22 +262,29 @@ but that misattributes work you did to an automation account and is not recommen
 
 Git and `gh` reach credentials by different routes, and only one of those routes is always
 active. Git consults the credential helper on every operation, wherever it runs. `gh` gets
-the App token from the shell function, which exists only in shells that sourced it — so a
-non-interactive shell, a script with `#!/bin/sh`, a cron job, a CI runner, or a tool that
-spawns `sh -c` all bypass it and fall back to whatever `gh auth` holds.
+the App token from the shell function — so the question for any `gh` command is simply
+whether that function is defined in the shell running it.
 
 | action | credential route | identity |
 |---|---|---|
 | `git push`, `fetch`, `clone` | credential helper | the App |
-| `gh …` in a shell that sourced the function | function injects `GH_TOKEN` | the App |
-| `gh …` in a non-interactive shell or script | `gh`'s own token store | you |
+| `gh …` where the function is defined | function injects `GH_TOKEN` | the App |
+| `gh …` where it is not | `gh`'s own token store | you |
 | `GH_TOKEN=… gh …` | the token you supplied | whoever that token belongs to |
 
-The practical consequence is that a pull request opened from an interactive terminal is
-authored by the App, while the same command run from a script is authored by you — and
-both branches were pushed by the App either way. Seeing your own account on a pull request
-does not mean the setup failed; it means that particular command did not go through the
-function.
+Being non-interactive is not itself the deciding factor, though it is the most common
+reason: zsh reads `~/.zshrc` only for interactive shells, so `zsh -c` does not get the
+function while `zsh -i -c` does. A script that sources the rc file, or inherits an
+environment where the function is already defined, uses the App like any terminal would.
+
+The other case is a shell that started before the function was installed. A long-lived
+session, or a tool that snapshots your environment at launch and reuses it, keeps running
+with the definitions it captured — adding the line to `~/.zshrc` afterwards does nothing
+for it until it is restarted or the file is sourced again.
+
+So a pull request may show your account even though its branch was pushed by the App. That
+is not a broken setup: `git push` went through the helper, and that `gh` invocation did not
+go through the function.
 
 To confirm which is in effect, ask the shell rather than guessing:
 
