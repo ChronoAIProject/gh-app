@@ -70,16 +70,16 @@ returns a classified outcome. It never guesses context.
 ```toml
 [[apps]]
 app_id      = 4483923
-private_key = "~/.config/github-app/chrono.pem"
+private_key = "~/.config/gh-app/keys/chrono.pem"
 owners      = ["ChronoAIProject"]   # optional: ordering + tie-break only, never authority
 
 [[apps]]
 app_id      = 5567890
-private_key = "~/.config/github-app/personal.pem"
+private_key = "~/.config/gh-app/keys/personal.pem"
 
 [[apps]]
 app_id      = 12345
-private_key = "~/.config/github-app/work.pem"
+private_key = "~/.config/gh-app/keys/work.pem"
 host        = "github.example.com"
 api_url     = "https://github.example.com/api/v3"
 ```
