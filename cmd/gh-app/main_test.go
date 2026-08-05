@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -98,6 +99,38 @@ func isolatedConfig(t *testing.T) string {
 	d := t.TempDir()
 	t.Setenv("GH_APP_CONFIG_DIR", filepath.Join(d, "config"))
 	return d
+}
+
+func TestConfigDirDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix default path assertion")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("GH_APP_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", home)
+
+	want := filepath.Join(home, ".config", "gh-app")
+	if got := configDir(); got != want {
+		t.Fatalf("configDir() = %q, want %q", got, want)
+	}
+}
+
+func TestConfigDirPrecedence(t *testing.T) {
+	root := t.TempDir()
+	override := filepath.Join(root, "override")
+	xdg := filepath.Join(root, "xdg")
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("GH_APP_CONFIG_DIR", override)
+
+	if got := configDir(); got != override {
+		t.Fatalf("configDir() = %q, want override %q", got, override)
+	}
+	t.Setenv("GH_APP_CONFIG_DIR", "")
+	if got, want := configDir(), filepath.Join(xdg, "gh-app"); got != want {
+		t.Fatalf("configDir() = %q, want XDG path %q", got, want)
+	}
 }
 
 func keyFile(t *testing.T, dir, name string) string {

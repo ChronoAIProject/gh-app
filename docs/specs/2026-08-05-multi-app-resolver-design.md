@@ -65,7 +65,7 @@ returns a classified outcome. It never guesses context.
 
 ## 4. Configuration
 
-`~/.config/gh-app/config.toml`. Strict decoding — unknown keys are an error.
+`~/.config/gh-app/config.toml` by default on Unix-like systems, including macOS; the Windows platform config directory is used on Windows. `GH_APP_CONFIG_DIR` takes precedence, followed by `$XDG_CONFIG_HOME/gh-app` when set. Strict decoding — unknown keys are an error.
 
 ```toml
 [[apps]]

@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,8 +124,15 @@ func configDir() string {
 	if v := os.Getenv("GH_APP_CONFIG_DIR"); v != "" {
 		return v
 	}
-	d, _ := os.UserConfigDir()
-	return filepath.Join(d, "gh-app")
+	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+		return filepath.Join(v, "gh-app")
+	}
+	if runtime.GOOS == "windows" {
+		d, _ := os.UserConfigDir()
+		return filepath.Join(d, "gh-app")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "gh-app")
 }
 func configPath() string       { return filepath.Join(configDir(), "config.toml") }
 func legacyConfigPath() string { return filepath.Join(configDir(), "config.json") }

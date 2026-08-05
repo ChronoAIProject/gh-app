@@ -72,7 +72,7 @@ host = "github.example.com"
 api_url = "https://github.example.com/api/v3"
 ```
 
-Unknown keys are rejected. Installation IDs are discovered from GitHub at resolution time. The unified cache is `~/.config/gh-app/cache.json`; both files can be relocated with `GH_APP_CONFIG_DIR`. Migrate an old singleton JSON configuration explicitly with `gh-app migrate`.
+Unknown keys are rejected. Installation IDs are discovered from GitHub at resolution time. The unified cache is `~/.config/gh-app/cache.json`. `GH_APP_CONFIG_DIR` relocates both files; otherwise `$XDG_CONFIG_HOME/gh-app` is used when set, followed by `~/.config/gh-app` on Unix-like systems or the platform config directory on Windows. Migrate an old singleton JSON configuration explicitly with `gh-app migrate`.
 
 ```bash
 GH_APP_CONFIG_DIR=~/.config/gh-app/staging gh app status
