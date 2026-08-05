@@ -52,3 +52,8 @@ jobs:
             gh release create "$RELEASE_TAG" --verify-tag --generate-notes
           fi
           gh release upload "$RELEASE_TAG" dist/gh-app-* dist/SHA256SUMS --clobber
+
+# After publishing the tag, bump Formula/gh-app.rb in ChronoAIProject/homebrew-tap:
+# update its url to the new tag's source archive and its sha256 to that archive's digest.
+# That digest is not in the release's SHA256SUMS, which covers only prebuilt binaries.
+# Run brew bump-formula-pr under the releaser's own credentials.
