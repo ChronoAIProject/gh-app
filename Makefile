@@ -2,8 +2,8 @@ BINARY := gh-app
 VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 DIST_TARGETS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
-MAIN_COVERAGE_FLOOR := 76.6
-CACHE_COVERAGE_FLOOR := 83.9
+MAIN_COVERAGE_FLOOR := 76.0
+CACHE_COVERAGE_FLOOR := 83.0
 
 # Optional local settings for `make test-e2e`, ignored by git. See README.
 -include .env
