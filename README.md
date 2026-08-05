@@ -62,15 +62,17 @@ Create `~/.config/gh-app/config.toml`:
 ```toml
 [[apps]]
 app_id = 123456
-private_key = "~/.config/github-app/work.pem"
+private_key = "~/.config/gh-app/keys/work.pem"
 owners = ["MyOrganization"]
 
 [[apps]]
 app_id = 789012
-private_key = "~/.config/github-app/enterprise.pem"
+private_key = "~/.config/gh-app/keys/enterprise.pem"
 host = "github.example.com"
 api_url = "https://github.example.com/api/v3"
 ```
+
+The private key is referenced by absolute path and is never copied, so it can live anywhere; `~/.config/gh-app/keys/` is only a suggestion that keeps everything this tool needs under one directory. `gh-app clear` removes only `cache.json` and the lock file, so keys stored alongside them are not touched.
 
 Unknown keys are rejected. Installation IDs are discovered from GitHub at resolution time. The unified cache is `~/.config/gh-app/cache.json`. `GH_APP_CONFIG_DIR` relocates both files; otherwise `$XDG_CONFIG_HOME/gh-app` is used when set, followed by `~/.config/gh-app`. Migrate an old singleton JSON configuration explicitly with `gh-app migrate`.
 
