@@ -106,7 +106,15 @@ Install the helper in the current repository (the default):
 gh-app git-install
 ```
 
-Use `gh-app git-install --global` only when global interception is intended; it previews the resulting helper chain first. Both modes reset inherited helpers for configured hosts before adding `gh-app`.
+Use `gh-app git-install --global` only when global interception is intended; it previews the resulting helper chain first. Both modes reset inherited helpers for configured hosts, then install `gh-app` followed by `gh`'s own helper:
+
+```
+helper =                              # reset
+helper = !"…/gh-app" credential       # repositories an App reaches
+helper = !…/gh auth git-credential    # everything else, as your own account
+```
+
+`gh-app` returns nothing for a repository no App reaches, so git falls through to `gh` and those repositories keep working exactly as before. If `gh` is not on `PATH` the fallback is omitted and a warning says so.
 
 Then use HTTPS remotes normally:
 

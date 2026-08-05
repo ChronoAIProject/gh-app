@@ -583,11 +583,89 @@ func TestGitInstallLocalResetsHelperChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	values := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
-	if len(values) != 2 || values[0] != "" || !strings.Contains(values[1], "gh-app") {
+	if len(values) < 2 || values[0] != "" || !strings.Contains(values[1], "gh-app") {
 		t.Fatalf("helper chain = %#v", values)
 	}
 	if v, _ := exec.Command("git", "config", "--local", "--get", "credential.https://github.com.useHttpPath").Output(); strings.TrimSpace(string(v)) != "true" {
 		t.Fatal("useHttpPath not set")
+	}
+}
+
+// gitInstallChain runs git-install in a throwaway repository with PATH
+// controlled, and returns the resulting helper chain.
+func gitInstallChain(t *testing.T, withGh bool) []string {
+	t.Helper()
+	d := isolatedConfig(t)
+	repo := filepath.Join(d, "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	// A PATH containing git but, unless asked for, no gh at all.
+	bin := filepath.Join(d, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	if withGh {
+		stub := "#!/bin/sh\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(stub), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+
+	old, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	key := keyFile(t, d, "key.pem")
+	saveConfig(t, Config{Apps: []AppConfig{testApp(1, key, "https://api.github.com")}})
+	if _, err := capture(t, func() error { return cmdGitInstall(nil) }); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "config", "--local", "--get-all", "credential.https://github.com.helper").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+}
+
+func TestGitInstallAppendsPersonalFallbackAfterGhApp(t *testing.T) {
+	values := gitInstallChain(t, true)
+	// Resetting the inherited chain also drops gh's own helper. Without
+	// restoring it, a repository no App reaches would have no credential
+	// source, contradicting the App-first-with-personal-backstop contract.
+	if len(values) != 3 {
+		t.Fatalf("helper chain = %#v, want reset + gh-app + gh fallback", values)
+	}
+	if values[0] != "" {
+		t.Errorf("chain does not start with the reset entry: %#v", values)
+	}
+	if !strings.Contains(values[1], "gh-app") {
+		t.Errorf("gh-app is not consulted first: %q", values[1])
+	}
+	if !strings.Contains(values[2], "auth git-credential") {
+		t.Errorf("personal fallback is not last: %q", values[2])
+	}
+}
+
+func TestGitInstallWithoutGhInstallsOnlyItself(t *testing.T) {
+	values := gitInstallChain(t, false)
+	if len(values) != 2 {
+		t.Fatalf("helper chain = %#v, want reset + gh-app only", values)
+	}
+	if values[0] != "" || !strings.Contains(values[1], "gh-app") {
+		t.Fatalf("helper chain = %#v", values)
 	}
 }
 

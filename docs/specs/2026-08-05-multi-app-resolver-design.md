@@ -171,8 +171,23 @@ Therefore `git-install`:
   reversible;
 - resets the inherited chain with an empty `helper =` entry before appending gh-app, so
   gh-app is consulted first;
+- **appends gh's own helper after gh-app**, restoring the personal-credential backstop
+  the reset removed. Section 1 defines this tool as App-first *with* a personal fallback;
+  a reset that drops gh's entry and stops there delivers only the first half, leaving any
+  repository no App reaches with no credential source at all. gh-app returns nothing for
+  such a target, so git moves on to the next helper — which must exist. When `gh` is not
+  on `PATH` the fallback is omitted and a warning says so, rather than silently
+  installing a chain that answers for some repositories and not others;
 - keeps emitting `password_expiry_utc`, without which osxkeychain caches a token past
   its one-hour life.
+
+The resulting chain, in the order git consults it:
+
+```
+helper =                              # reset: drops the unconditional system helper
+helper = !"…/gh-app" credential       # App-covered targets
+helper = !…/gh auth git-credential    # everything else, as your own account
+```
 
 ## 8. Shell integration
 
