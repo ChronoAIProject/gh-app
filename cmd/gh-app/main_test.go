@@ -1108,6 +1108,53 @@ func TestConfigDefaultsAndStaleJSONMessage(t *testing.T) {
 	}
 }
 
+func TestStatusReportsMalformedAPIURL(t *testing.T) {
+	d := isolatedConfig(t)
+	key := keyFile(t, d, "key.pem")
+	saveConfig(t, Config{Apps: []AppConfig{testApp(1, key, "https://exa mple.com")}})
+	err := cmdStatus()
+	if err == nil {
+		t.Fatal("cmdStatus() = nil, want an error naming the malformed api_url")
+	}
+	if !strings.Contains(err.Error(), "exa mple.com") {
+		t.Fatalf("error = %v, want it to name the offending api_url", err)
+	}
+}
+
+func TestOneBrokenAppDoesNotMaskAnotherThatMatches(t *testing.T) {
+	d := isolatedConfig(t)
+	key := keyFile(t, d, "key.pem")
+	s := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			token(w, "app2-token", time.Hour)
+			return
+		}
+		if jwtIssuer(r.Header.Get("Authorization")) == "1" {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
+		installation(w, 22)
+	})
+	saveConfig(t, Config{Apps: []AppConfig{testApp(1, key, s.URL), testApp(2, key, s.URL)}})
+	r := resolve(Target{"github.com", "acme", "repo"})
+	if r.Outcome != OutcomeOK || r.AppID != 2 || r.Token != "app2-token" {
+		t.Fatalf("result = %+v, want app 2 to still resolve past app 1's outage", r)
+	}
+}
+
+func TestExplicitTargetAcceptsEnterpriseHost(t *testing.T) {
+	target, err := explicitTarget("ghe.corp.example/acme/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Target{"ghe.corp.example", "acme", "repo"}); target != want {
+		t.Fatalf("explicitTarget() = %+v, want %+v", target, want)
+	}
+	if target, err := explicitTarget("acme/repo"); err != nil || target.Host != "github.com" {
+		t.Fatalf("two-segment form = %+v err=%v, want github.com default", target, err)
+	}
+}
+
 func fileMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)
