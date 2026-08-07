@@ -220,6 +220,8 @@ gh-app token --target OWNER/REPO
 GH_APP_TARGET=OWNER/REPO gh-app token --auto
 ```
 
+Both accept `HOST/OWNER/REPO` when the target lives on a GitHub Enterprise Server host declared in `config.toml`; the two-segment form assumes `github.com`.
+
 Git reports rejected credentials back through the helper and invalidates that repository's cached token. The shell-wrapped `gh` process does not expose GitHub HTTP status to the wrapper; after access is revoked, run `gh-app clear` to force revalidation before the normal five-minute refresh margin.
 
 ## Use with Git

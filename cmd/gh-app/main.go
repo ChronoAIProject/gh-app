@@ -120,7 +120,7 @@ func usage() {
 	fmt.Print(`gh-app - repository-scoped GitHub App credential resolver
 
 Usage:
-  gh-app token [--auto|--target owner/repo]
+  gh-app token [--auto|--target [host/]owner/repo]
   gh-app credential [get|store|erase]
   gh-app git-install [--global]
   gh-app shell-init [bash|zsh]
@@ -208,6 +208,10 @@ func resolve(target Target) Result {
 	}
 
 	preferred, remaining := candidates(cfg, target)
+	// A probe failure is recorded rather than returned: one App with a revoked
+	// key or an unreachable host must not hide another App that does reach the
+	// target. The collected errors only surface when nothing matched at all.
+	var probeErrs []error
 	for _, group := range [][]AppConfig{preferred, remaining} {
 		matches := make([]struct {
 			app AppConfig
@@ -216,7 +220,8 @@ func resolve(target Target) Result {
 		for _, app := range group {
 			id, found, probeErr := probeInstallation(app, target)
 			if probeErr != nil {
-				return Result{Outcome: OutcomeOperationalError, Err: probeErr}
+				probeErrs = append(probeErrs, probeErr)
+				continue
 			}
 			if found {
 				matches = append(matches, struct {
@@ -244,6 +249,9 @@ func resolve(target Target) Result {
 			}
 			return Result{Outcome: OutcomeOK, Token: token, ExpiresAt: exp, AppID: m.app.AppID, InstallationID: m.id}
 		}
+	}
+	if len(probeErrs) > 0 {
+		return Result{Outcome: OutcomeOperationalError, Err: errors.Join(probeErrs...)}
 	}
 	return Result{Outcome: OutcomeNoMatch, Err: fmt.Errorf("no configured App established access to %s", formatTarget(target))}
 }
@@ -409,7 +417,7 @@ func isCacheLockTimeout(err error) bool {
 func cmdToken(args []string) error {
 	fs := flag.NewFlagSet("token", flag.ContinueOnError)
 	auto := fs.Bool("auto", false, "infer target from the current repository")
-	targetFlag := fs.String("target", "", "target owner/repo")
+	targetFlag := fs.String("target", "", "target [host/]owner/repo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -425,7 +433,7 @@ func cmdToken(args []string) error {
 	} else if *auto {
 		target, err = inferTarget()
 	} else {
-		return errors.New("one of --auto or --target owner/repo is required")
+		return errors.New("one of --auto or --target [host/]owner/repo is required")
 	}
 	if err != nil {
 		return err
@@ -594,7 +602,10 @@ func cmdStatus() error {
 		if err != nil {
 			return err
 		}
-		req, _ := apiRequest(http.MethodGet, app.APIURL+"/app/installations", jwt, nil)
+		req, err := apiRequest(http.MethodGet, app.APIURL+"/app/installations", jwt, nil)
+		if err != nil {
+			return fmt.Errorf("app %d: %w", app.AppID, err)
+		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return err
@@ -664,12 +675,19 @@ func cmdMigrate() error {
 	return os.Chmod(configDir(), 0700)
 }
 
+// explicitTarget accepts owner/repo, which assumes github.com, and the
+// host/owner/repo form an Enterprise Server user needs to reach a host their
+// config declares but no remote URL names.
 func explicitTarget(s string) (Target, error) {
 	parts := strings.Split(strings.Trim(s, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return Target{}, fmt.Errorf("target %q must be owner/repo", s)
+	host := "github.com"
+	if len(parts) == 3 {
+		host, parts = parts[0], parts[1:]
 	}
-	return Target{"github.com", parts[0], strings.TrimSuffix(parts[1], ".git")}, nil
+	if len(parts) != 2 || host == "" || parts[0] == "" || parts[1] == "" {
+		return Target{}, fmt.Errorf("target %q must be owner/repo or host/owner/repo", s)
+	}
+	return Target{host, parts[0], strings.TrimSuffix(parts[1], ".git")}, nil
 }
 
 func inferTarget() (Target, error) {
